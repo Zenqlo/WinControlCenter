@@ -14,7 +14,7 @@ Change Resolution/Volume/Device without going into multiple pages of Windows set
 
 ### Phone Screenshot
 
-<img src="./Image/Phone1.PNG" width="200"></img><img src="./Image/Phone2.PNG" width="200"></img><img src="./Image/Phone3.PNG" width="200"></img>
+<img src="./Image/Phone1.PNG" width="200"></img> <img src="./Image/Phone2.PNG" width="200"></img> <img src="./Image/Phone3.PNG" width="200"></img>
 
 
 ### Windows Screenshots
