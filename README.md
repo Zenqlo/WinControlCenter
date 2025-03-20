@@ -18,6 +18,9 @@ Change Resolution/Volume/Device without going into multiple pages of Windows set
 
 
 ### Windows Screenshots
+
+<img src="./Image/Tray.PNG" width="200"></img>
+
 <img src="./Image/Volume.PNG" width="340"></img> <img src="./Image/Resolution.PNG" width="290"></img>
 
 <img src="./Image/Setting.PNG" width="480">
