@@ -1,16 +1,13 @@
-﻿using System;
-using System.Windows;
+﻿using System.Windows;
 using System.Text.RegularExpressions;
 using System.Collections.ObjectModel;
-using System.Net;
 using System.Net.NetworkInformation;
 using System.Windows.Controls;
-using System.Linq;
 using System.ComponentModel;
 using System.Windows.Data;
 using System.Windows.Media;
 using System.Globalization;
-using Microsoft.Win32;
+
 
 namespace WinControlCenter
 {
