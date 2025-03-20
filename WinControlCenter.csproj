@@ -1,0 +1,123 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+	  <TargetFramework>net9.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <UseWPF>true</UseWPF>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>icon.ico</ApplicationIcon>
+    <NuGetAuditMode>direct</NuGetAuditMode>
+	  <PublishSingleFile>true</PublishSingleFile>
+    <SelfContained>true</SelfContained>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <PublishReadyToRun>true</PublishReadyToRun>
+    <DebugType>None</DebugType>
+	  <TrimMode>link</TrimMode>
+	  <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>    
+    <Title>WinControlCenter</Title>    
+    <Company>ZENQLO</Company>
+    <Copyright>ZENQLO</Copyright>
+	  <Version>1.0.0-alpha</Version>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>		
+		<TrimmerRootAssembly Include="PresentationCore" />
+		<TrimmerRootAssembly Include="PresentationFramework" />
+		<TrimmerRootAssembly Include="WindowsBase" />		
+		<TrimmerRootAssembly Include="System.Xaml" />
+	</ItemGroup>
+
+  <ItemGroup>    
+    <Compile Remove="Sample\**" />    
+    <Compile Remove="wwwroot\**" />    
+    <EmbeddedResource Remove="Sample\**" />    
+    <EmbeddedResource Remove="wwwroot\**" />    
+    <None Remove="Sample\**" />    
+    <None Remove="wwwroot\**" />    
+    <Page Remove="Sample\**" />    
+    <Page Remove="wwwroot\**" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Remove="bootstrap-icons.css" />
+    <None Remove="bootstrap-icons.min.css" />
+    <None Remove="bootstrap-icons.woff" />
+    <None Remove="bootstrap.bundle.js" />    
+    <None Remove="bootstrap.css" />
+    <None Remove="bootstrap.css.map" />
+    <None Remove="bootstrap-icons.woff" />
+    <None Remove="favicon.ico" />  
+    <None Remove="Main.html" />
+    <None Remove="popper.min.js" />
+    <None Remove="app.manifest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="AudioSwitcher.AudioApi.CoreAudio" Version="3.0.3" />
+    <PackageReference Include="Hardcodet.NotifyIcon.Wpf" Version="2.0.1" />
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.3124.44" />
+    <PackageReference Include="MouseKeyHook" Version="5.7.1" />
+    <PackageReference Include="System.Management" Version="9.0.3" />
+    <PackageReference Include="System.ServiceProcess.ServiceController" Version="9.0.3" />
+    <PackageReference Include="WindowsFirewallHelper" Version="2.2.0.86" />	
+  </ItemGroup>
+
+  <ItemGroup>
+    <Resource Include="icon.ico">
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>      
+    </Resource>
+    <EmbeddedResource Include="bootstrap-icons.css">
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>      
+    </EmbeddedResource>    
+    <EmbeddedResource Include="bootstrap.bundle.js">      
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>      
+    </EmbeddedResource>    
+    <EmbeddedResource Include="bootstrap.css">      
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>      
+    </EmbeddedResource>
+    <EmbeddedResource Include="bootstrap.css.map">      
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>      
+    </EmbeddedResource>
+    <EmbeddedResource Include="favicon.ico">
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>      
+    </EmbeddedResource>
+    <EmbeddedResource Include="bootstrap-icons.woff">
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>      
+    </EmbeddedResource>
+    <EmbeddedResource Include="Main.html">      
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </EmbeddedResource>
+    <EmbeddedResource Include="popper.min.js">      
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </EmbeddedResource>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Update="Properties\Settings.Designer.cs">
+      <DesignTimeSharedInput>True</DesignTimeSharedInput>
+      <AutoGen>True</AutoGen>
+      <DependentUpon>Settings.settings</DependentUpon>
+    </Compile>
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="app.manifest">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </None>
+    <None Update="WinControlCenter.Settings.xml">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </None>
+    <None Update="Properties\Settings.settings">
+      <Generator>SettingsSingleFileGenerator</Generator>
+      <LastGenOutput>Settings.Designer.cs</LastGenOutput>
+    </None>
+  </ItemGroup>
+
+</Project>

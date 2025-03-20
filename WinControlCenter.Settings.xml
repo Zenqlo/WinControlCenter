@@ -1,0 +1,18 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Settings>
+  <Password>EKGq6JaT</Password>
+  <Features>
+    <Speaker>True</Speaker>
+    <Microphone>True</Microphone>
+    <Mouse>True</Mouse>
+    <Display>True</Display>
+    <RunAtStartup>True</RunAtStartup>
+    <EnabledSubnets />
+    <MouseSettings>
+      <Sensitivity>1.2</Sensitivity>
+      <ScrollSensitivity>4</ScrollSensitivity>
+      <AccelerationFactor>1.5</AccelerationFactor>
+      <MaxAcceleration>3</MaxAcceleration>
+    </MouseSettings>
+  </Features>
+</Settings>

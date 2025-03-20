@@ -1,0 +1,43 @@
+﻿<Window x:Class="WinControlCenter.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:local="clr-namespace:WinControlCenter"
+        xmlns:wv2="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf"        
+        Title="WinControlCenter" 
+        Height="560" Width="400"
+        WindowStyle="None"
+        Background="Transparent"
+        ResizeMode="NoResize"
+        ShowInTaskbar="False"
+        WindowState="Normal"
+        >
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+        <TextBlock x:Name="StatusText" 
+           Grid.Row="0"
+           Width="400" Height="20"                   
+           Text="Initializing..."
+           Foreground="White"
+           Background="#6C757D"
+           Padding="2"
+           TextAlignment="Center"
+           Visibility="Visible"/>
+        
+        <wv2:WebView2 x:Name="WebViewControl"  
+                      Grid.Row="1"
+                      Width="400" Height="540" 
+                      Source="about:blank"
+                      CreationProperties="{x:Null}"
+                      NavigationCompleted="WebViewControl_NavigationCompleted"
+                      NavigationStarting="WebViewControl_NavigationStarting"
+                      WebMessageReceived="WebViewControl_WebMessageReceived"
+                      CoreWebView2InitializationCompleted="WebViewControl_CoreWebView2InitializationCompleted"/>
+        
+        
+    </Grid>
+</Window>

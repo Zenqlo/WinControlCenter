@@ -1,0 +1,1257 @@
+﻿<!DOCTYPE html>
+<html lang="en" xmlns="http://www.w3.org/1999/xhtml">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>WinControlCenter</title>
+    <script>
+        // Get the password from the URL path
+        const password = window.location.pathname.split('/')[1];
+
+        // Get the resources path
+        const getResourcePath = path => `/${password}/${path}`;
+        
+        // Load resources with retry logic
+        const loadResource = (type, src, id) => new Promise((resolve, reject) => {
+            const element = document.createElement(type === 'script' ? 'script' : 'link');
+            if (type === 'script') {
+                element.src = src;                
+                element.setAttribute('data-source-map', 'false');
+                element.setAttribute('data-nomap', '');
+            } else {
+                element.rel = 'stylesheet';
+                element.href = src;
+            }
+            element.id = id;
+            element.crossOrigin = 'anonymous';
+            element.onload = resolve;
+            element.onerror = () => reject(new Error(`Failed to load ${src}`));
+            document.head.appendChild(element);
+        });
+
+        // Initialize features and WebSocket manager
+        function initializeFeatures() {
+            const featuresContainer = document.getElementById('features');
+            const wsManager = new WebSocketManager();
+            
+            // Add audio features (speaker and microphone)
+            wsManager.addFeature(new AudioFeature(featuresContainer, {
+                title: 'Speaker',
+                type: 'speaker',
+                iconPrefix: 'volume-up',
+                wide: true
+            }));
+
+            // Add microphone feature
+            wsManager.addFeature(new AudioFeature(featuresContainer, {
+                title: 'Microphone',
+                type: 'microphone',
+                iconPrefix: 'mic',
+                wide: true
+            }));
+
+            // Add display and mouse control features
+            wsManager.addFeature(new DisplayFeature(featuresContainer, { wide: true }));
+            wsManager.addFeature(new MouseFeature(featuresContainer, { wide: true }));
+            
+            wsManager.connect();
+        }
+
+        // Load resources in sequence with retry logic
+        async function loadResources() {
+            try {
+                // Load CSS resources first
+                await loadResource('link', getResourcePath('bootstrap.css'), 'bootstrapCss');
+                await loadResource('link', getResourcePath('bootstrap-icons.css'), 'bootstrapIconsCss');
+                
+                // Load favicon
+                const favicon = document.createElement('link');
+                favicon.rel = 'icon';
+                favicon.type = 'image/ico';
+                favicon.href = getResourcePath('favicon.ico');
+                favicon.crossOrigin = 'anonymous';
+                document.head.appendChild(favicon);
+                
+                // Load JavaScript with retry logic
+                const loadWithRetry = async (type, src, id, retries = 3) => {
+                    try {
+                        await loadResource(type, src, id);
+                    } catch (error) {
+                        if (retries > 0) {
+                            console.warn(`Failed to load ${src}, retrying... (${retries} attempts left)`);
+                            await new Promise(resolve => setTimeout(resolve, 1000));
+                            return loadWithRetry(type, src, id, retries - 1);
+                        }
+                        throw error;
+                    }
+                };
+                
+                await loadWithRetry('script', getResourcePath('popper.min.js'), 'popperJs');
+                await loadWithRetry('script', getResourcePath('bootstrap.bundle.js'), 'bootstrapJs');
+                                
+                initializeFeatures();
+            } catch (error) {
+                console.error('Error loading resources:', error);
+                document.getElementById('connectionStatus').textContent = 'Failed to load resources. Please refresh the page.';
+            }
+        }
+
+        // Start when DOM is ready
+        document.addEventListener('DOMContentLoaded', loadResources);
+    </script>
+    <style>
+        body {
+            overflow: hidden;
+            touch-action: none;
+            position: fixed;
+            width: 100%;
+            height: 100%;
+        }
+        .feature-block.wide { grid-column: 1 / -1; }
+        .prevent-select {
+            -webkit-user-select: none; /* Safari */
+            -ms-user-select: none; /* IE 10 and IE 11 */
+            -moz-user-select: none; /* Firefox */
+            user-select: none; /* Standard syntax */
+        }
+        .btn-outline-light:focus {
+            box-shadow: none !important;
+            background-color: transparent !important;
+            color: #f8f9fa !important;
+        }
+        .btn-outline-light:active {
+            background-color: rgba(248, 249, 250, 0.1) !important;
+        }
+        /* Fallback for browsers that don't support dvh */
+        #mouseModal .modal-dialog {
+            height: 100vh;
+            height: 100dvh;
+            margin-left: auto;
+            margin-right: auto;
+        }
+    </style>
+</head>
+<body class="bg-dark text-white prevent-select">
+    <div class="d-flex flex-column prevent-select">
+        <div id="statusContainer" class="border-dark p-2 text-center prevent-select">
+            <div id="connectionStatus">Connecting...</div>                 
+        </div>
+        <div class="flex-grow-1 d-grid gap-3 px-3 pt-3 pb-4 prevent-select" id="features">
+            <div id="speakerContainer" class="wide prevent-select"></div>
+            <div id="microphoneContainer" class="wide prevent-select"></div>
+            <div class="d-flex justify-content-center align-items-center wide prevent-select">
+                <div class="d-flex gap-3 flex-grow-1">
+                    <div id="displayContainer" class="flex-grow-1 prevent-select"></div>
+                    <div id="mouseContainer" class="flex-grow-1 prevent-select"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Base Feature class for all control features
+        class Feature {
+            constructor(container, config) {
+                this.container = container;
+                this.config = config;
+                this.element = null;
+                console.log('Feature initialized:', this.constructor.name);
+            }
+
+            createBlock() {
+                const block = document.createElement('div');
+                block.className = `bg-secondary rounded p-1 feature-block prevent-select ${this.config.wide ? 'wide' : ''}`;
+                block.innerHTML = '<div class="feature-content prevent-select"></div>';
+                this.element = block;
+                this.container.appendChild(block);
+                return block.querySelector('.feature-content');
+            }
+
+            sendWebSocketMessage(type, data = {}) {                
+                if (window.ws?.readyState === WebSocket.OPEN) {
+                    const message = JSON.stringify({ Type: type, Data: data });
+                    console.log('WebSocket message sent:', message);
+                    window.ws.send(message);
+                } else {
+                    console.warn('WebSocket not ready, state:', window.ws?.readyState);
+                }
+            }
+
+            onStateUpdate(data) {
+                // Base implementation - should be overridden by child classes
+                console.log('Base onStateUpdate called for:', this.constructor.name, data);
+            }
+
+            requestState() {
+                // Base implementation - should be overridden by child classes
+                console.log('Base requestState called for:', this.constructor.name);
+            }
+        }
+
+        // Audio Feature class
+        class AudioFeature extends Feature {
+            constructor(container, config) {
+                const targetContainer = config.type === 'speaker' ? 
+                    container.querySelector('#speakerContainer') : 
+                    container.querySelector('#microphoneContainer');
+                super(targetContainer || container, config);
+                this.type = config.type;
+                this.iconPrefix = config.iconPrefix;
+                this.isMuted = false;
+                this.currentValue = 0;
+                this.updateTimeout = null;
+                this.throttleDelay = 100;
+                this.isUpdatingFromServer = false;
+                this.setupUI();
+            }
+
+            setupUI() {
+                const content = this.createBlock();
+                content.innerHTML = `
+                    <div class="accordion prevent-select" id="${this.type}Accordion">
+                        <div class="accordion-item bg-secondary border-0">
+                            <h2 class="accordion-header">
+                                <button class="accordion-button bg-secondary text-light px-4 py-2 prevent-select" type="button" 
+                                        data-bs-toggle="collapse" data-bs-target="#${this.type}Controls">
+                                    ${this.config.title}
+                                </button>
+                            </h2>
+                            <div id="${this.type}Controls" class="accordion-collapse collapse show">
+                                <div class="accordion-body prevent-select">
+                                    <div class="d-flex align-items-center gap-2 mb-2">
+                                        <span class="text-light prevent-select">Device:</span>
+                                        <select class="form-select form-select-sm flex-grow-1 prevent-select" id="${this.type}Select">
+                                            <option value="">Loading devices...</option>
+                                        </select>
+                                    </div>
+                                    <div class="text-light fs-6 prevent-select" id="${this.type}VolumeDisplay">0%</div>
+                                    <div class="d-flex align-items-center gap-3">
+                                        <button class="btn btn-outline-light px-2 py-0 prevent-select" id="${this.type}MuteButton">
+                                            <i class="bi bi-${this.iconPrefix} fs-4"></i>
+                                        </button>
+                                        <input type="range" class="form-range flex-grow-1 prevent-select" 
+                                               style="--bs-form-range-thumb-width: 2rem;"
+                                               min="0" max="100" id="${this.type}VolumeSlider">
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+
+                this.slider = document.getElementById(`${this.type}VolumeSlider`);
+                this.display = document.getElementById(`${this.type}VolumeDisplay`);
+                this.muteButton = document.getElementById(`${this.type}MuteButton`);
+                this.deviceSelect = document.getElementById(`${this.type}Select`);
+
+                this.slider.addEventListener('input', this.handleVolumeChange.bind(this));
+                this.muteButton.addEventListener('click', this.handleMuteClick.bind(this));
+                this.deviceSelect.addEventListener('change', this.handleDeviceChange.bind(this));
+            }
+
+            handleVolumeChange(e) {
+                const volumePercent = e.target.value;
+                this.display.textContent = `${volumePercent}%`;
+                this.currentValue = volumePercent / 100;
+                
+                clearTimeout(this.updateTimeout);
+                this.updateTimeout = setTimeout(() => {
+                    this.sendWebSocketMessage(this.type, { value: this.currentValue, muted: this.isMuted });
+                }, this.throttleDelay);
+            }
+
+            updateMuteUI(muted) {
+                const iconName = muted ? 
+                    (this.type === 'speaker' ? 'volume-mute' : 'mic-mute') : 
+                    (this.type === 'speaker' ? 'volume-up' : 'mic');
+                this.muteButton.innerHTML = `<i class="bi bi-${iconName} fs-4"></i>`;
+            }
+
+            handleMuteClick() {
+                if (this.isUpdatingFromServer) return;
+                const newMutedState = !this.isMuted;
+                this.sendWebSocketMessage(this.type, { value: this.currentValue, muted: newMutedState });
+            }
+
+            handleDeviceChange(e) {
+                const deviceId = e.target.value;
+                if (deviceId) this.sendWebSocketMessage(this.type, { deviceId });
+            }
+
+            onStateUpdate(data) {
+                if (data.type === this.type) {
+                    const state = data.value;
+                    if (typeof state === 'object' && state !== null) {
+                        const volumePercent = Math.round(state.Volume * 100);
+                        if (this.slider.value != volumePercent) {
+                            this.slider.value = volumePercent;
+                            this.display.textContent = `${volumePercent}%`;
+                        }
+                        this.currentValue = state.Volume;
+                        
+                        if (this.isMuted !== state.Muted) {
+                            this.isUpdatingFromServer = true;
+                            this.isMuted = state.Muted;
+                            this.updateMuteUI(state.Muted);
+                            this.isUpdatingFromServer = false;
+                        }
+
+                        if (state.AvailableDevices) {
+                            this.deviceSelect.innerHTML = state.AvailableDevices
+                                .map(device => `<option value="${device.Id}" ${device.IsDefault ? 'selected' : ''}>${device.Name}</option>`)
+                                .join('');
+                        }
+                    }
+                }
+            }
+
+            requestState() {
+                this.sendWebSocketMessage('get' + this.type);
+            }
+        }
+
+        // Display Feature class
+        class DisplayFeature extends Feature {
+            constructor(container, config) {
+                super(container.querySelector('#displayContainer') || container, config);
+                this.isUIInitialized = false;
+                this.modal = null;
+                this.modalElement = null;
+                if (typeof bootstrap !== 'undefined') {
+                    this.setupUI();
+                } else {
+                    const checkBootstrap = setInterval(() => {
+                        if (typeof bootstrap !== 'undefined') {
+                            clearInterval(checkBootstrap);
+                            this.setupUI();
+                        }
+                    }, 100);
+                }
+            }
+
+            setupUI() {
+                const content = this.createBlock();
+                content.innerHTML = `
+                    <div class="d-flex justify-content-center gap-2 flex-grow-1">                        
+                        <button class="btn btn-primary flex-grow-1" type="button" data-bs-toggle="modal" data-bs-target="#displayModal">
+                            <i class="bi bi-display me-2"></i>Display
+                        </button>
+                    </div>
+                    <div class="modal fade" id="displayModal" tabindex="-1" aria-labelledby="displayModalLabel" aria-hidden="true">
+                        <div class="modal-dialog modal-lg">
+                            <div class="modal-content bg-dark prevent-select">
+                                <div class="modal-header border-secondary prevent-select">
+                                    <h5 class="modal-title text-light prevent-select" id="displayModalLabel">Display Settings</h5>
+                                    <button type="button" class="btn-close btn-close-white prevent-select" data-bs-dismiss="modal" aria-label="Close"></button>
+                                </div>
+                                <div class="modal-body prevent-select">
+                                    <div class="mb-3">
+                                        <label for="monitorSelect" class="form-label text-light prevent-select">Monitor</label>
+                                        <select class="form-select bg-secondary text-light border-dark prevent-select" id="monitorSelect">
+                                            <option value="">Loading monitors...</option>
+                                        </select>
+                                    </div>
+                                    <div class="row mb-3">
+                                        <div class="col">
+                                            <label for="resolutionSelect" class="form-label text-light prevent-select">Resolution</label>
+                                            <select class="form-select bg-secondary text-light border-dark prevent-select" id="resolutionSelect">
+                                                <option value="">Select resolution...</option>
+                                            </select>
+                                        </div>
+                                        <div class="col">
+                                            <label for="refreshRateSelect" class="form-label text-light prevent-select">&nbsp;</label>
+                                            <select class="form-select bg-secondary text-light border-dark prevent-select" id="refreshRateSelect">
+                                                <option value="">Hz</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label for="rotationSelect" class="form-label text-light prevent-select">Rotation</label>
+                                        <select class="form-select bg-secondary text-light border-dark prevent-select" id="rotationSelect">
+                                            <option value="0">0° (Landscape)</option>
+                                            <option value="1">90° (Portrait)</option>
+                                            <option value="2">180° (Landscape Flipped)</option>
+                                            <option value="3">270° (Portrait Flipped)</option>
+                                        </select>
+                                    </div>
+                                    <div class="form-check form-switch mb-3">
+                                        <input class="form-check-input prevent-select" type="checkbox" id="persistCheck" checked>
+                                        <label class="form-check-label text-light prevent-select" for="persistCheck">
+                                            Save settings after restart
+                                        </label>
+                                    </div>
+                                    <div class="alert alert-warning d-none prevent-select" id="displayAlert" role="alert"></div>
+                                </div>
+                                <div class="modal-footer border-secondary prevent-select">
+                                    <button type="button" class="btn btn-secondary prevent-select" data-bs-dismiss="modal">Cancel</button>
+                                    <button type="button" class="btn btn-primary prevent-select" id="applyButton">Apply Changes</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+
+                this.monitorSelect = document.getElementById('monitorSelect');
+                this.resolutionSelect = document.getElementById('resolutionSelect');
+                this.refreshRateSelect = document.getElementById('refreshRateSelect');
+                this.rotationSelect = document.getElementById('rotationSelect');
+                this.persistCheck = document.getElementById('persistCheck');
+                this.applyButton = document.getElementById('applyButton');
+                this.alertBox = document.getElementById('displayAlert');
+                
+                // Initialize modal
+                this.modalElement = document.getElementById('displayModal');
+                this.modal = new bootstrap.Modal(this.modalElement);
+
+                this.monitorSelect.addEventListener('change', () => this.updateResolutionOptions());
+                this.applyButton.addEventListener('click', () => this.applySettings());
+                
+                // Request initial state when modal is shown
+                this.modalElement.addEventListener('show.bs.modal', () => {
+                    this.requestState();
+                });
+
+                // Add event listener for feature disable while modal is open
+                const observer = new MutationObserver((mutations) => {
+                    mutations.forEach((mutation) => {
+                        if (mutation.type === 'style' && 
+                            this.element.style.opacity === '0.5' && 
+                            this.modal._isShown) {
+                            // Feature was disabled while modal is open
+                            this.cleanupModal();
+                        }
+                    });
+                });
+                
+                observer.observe(this.element, { 
+                    attributes: true, 
+                    attributeFilter: ['style'] 
+                });
+                
+                this.isUIInitialized = true;
+                
+                if (this.currentState) {
+                    this.updateUIWithState(this.currentState);
+                }
+            }
+
+            cleanupModal() {
+                if (this.modal && this.modal._isShown) {
+                    // Hide modal using Bootstrap's built-in method
+                    this.modal.hide();
+                    
+                    // Remove any lingering backdrop (edge case)
+                    const backdrop = document.querySelector('.modal-backdrop');
+                    if (backdrop) backdrop.remove();
+                }
+            }
+
+            showAlert(message, type = 'warning') {
+                if (!this.isUIInitialized) return;
+                this.alertBox.textContent = message;
+                this.alertBox.className = `alert alert-${type}`;
+                this.alertBox.classList.remove('d-none');
+            }
+
+            hideAlert() {
+                if (!this.isUIInitialized) return;
+                this.alertBox.classList.add('d-none');
+            }
+
+            updateResolutionOptions() {
+                if (!this.isUIInitialized) return;
+                const selectedMonitor = this.getSelectedMonitor();
+                if (!selectedMonitor) return;
+
+                this.resolutionSelect.innerHTML = selectedMonitor.AvailableModes
+                    .map(mode => {
+                        const value = `${mode.Width}x${mode.Height}`;
+                        const isCurrentMode = mode.Width === selectedMonitor.CurrentMode.Width && 
+                                           mode.Height === selectedMonitor.CurrentMode.Height;
+                        return `<option value="${value}" ${isCurrentMode ? 'selected' : ''}>${value}</option>`;
+                    })
+                    .join('');
+                
+                const currentResolution = this.resolutionSelect.value;
+                const selectedMode = selectedMonitor.AvailableModes.find(
+                    mode => `${mode.Width}x${mode.Height}` === currentResolution
+                );
+
+                const currentFreq = selectedMonitor.CurrentMode?.Frequency || 60;
+                
+                if (selectedMode) {
+                    this.refreshRateSelect.innerHTML = selectedMode.Frequencies
+                        .map(freq => {
+                            const isCurrentFreq = freq === currentFreq;
+                            return `<option value="${freq}" ${isCurrentFreq ? 'selected' : ''}>${freq} Hz</option>`;
+                        })
+                        .join('');
+                } else {
+                    this.refreshRateSelect.innerHTML = `<option value="${currentFreq}">${currentFreq} Hz</option>`;
+                }
+
+                const currentOrientation = selectedMonitor.CurrentMode?.Orientation ?? 0;
+                this.rotationSelect.value = currentOrientation.toString();
+                
+                this.hideAlert();
+            }
+
+            getSelectedMonitor() {
+                if (!this.isUIInitialized) return null;
+                const monitorId = parseInt(this.monitorSelect.value);
+                return this.currentState?.Displays.find(d => d.Index === monitorId);
+            }
+
+            async applySettings() {
+                if (!this.isUIInitialized) return;
+                const monitor = this.getSelectedMonitor();
+                if (!monitor) {
+                    this.showAlert('Please select a monitor');
+                    return;
+                }
+
+                const [width, height] = this.resolutionSelect.value.split('x').map(Number);
+                if (!width || !height) {
+                    this.showAlert('Please select a resolution');
+                    return;
+                }
+
+                const frequency = parseInt(this.refreshRateSelect.value) || monitor.CurrentMode?.Frequency || 60;
+                const orientation = parseInt(this.rotationSelect.value) || 0;
+
+                const data = {
+                    monitorId: monitor.Index,
+                    width,
+                    height,
+                    frequency,
+                    orientation,
+                    noPersist: !this.persistCheck.checked
+                };
+
+                this.applyButton.disabled = true;
+                this.showAlert('Applying display settings...', 'info');
+
+                try {
+                    this.sendWebSocketMessage('display', data);
+                    // Auto-hide modal after successful settings application
+                    this.modal.hide();
+                    this.applyButton.disabled = false;
+                } catch (error) {
+                    this.showAlert('Failed to apply settings: ' + error.message, 'danger');
+                    this.applyButton.disabled = false;
+                }
+            }
+
+            updateUIWithState(data) {
+                if (!this.isUIInitialized) return;
+                
+                this.monitorSelect.innerHTML = data.Displays
+                    .map(display => `
+                        <option value="${display.Index}" ${display.IsSelected ? 'selected' : ''}>
+                            ${display.DisplayName}${display.IsPrimary ? ' (Primary)' : ''}
+                        </option>
+                    `)
+                    .join('');
+
+                this.updateResolutionOptions();
+            }
+
+            onStateUpdate(data) {
+                if (data.type === 'display') {
+                    this.currentState = data.value;
+                    if (this.isUIInitialized) {
+                        this.updateUIWithState(data.value);
+                    }
+                }
+            }
+
+            requestState() {
+                this.sendWebSocketMessage('getdisplay');
+            }
+        }
+
+        // Mouse Feature class
+        class MouseFeature extends Feature {
+            constructor(container, config) {
+                super(container.querySelector('#mouseContainer') || container, config);
+                this.isUIInitialized = false;
+                this.pendingState = null;
+                
+                // Initialize with placeholder values that will be updated from server
+                this.sensitivity = 1.0;
+                this.scrollSensitivity = 1.0;
+                this.accelerationFactor = 1.0;
+                this.maxAcceleration = 1.0;
+                this.scrollAccelerationFactor = 0.4;
+                this.scrollMaxAcceleration = 1.5;
+                this.lastTapTime = 0;  // Add this line to track last tap time
+                
+                this.setupUI();
+            }
+
+            setupUI() {
+                const content = this.createBlock();
+                content.innerHTML = `
+                    <div class="d-flex justify-content-center flex-grow-1">
+                        <button class="btn btn-primary flex-grow-1" type="button" data-bs-toggle="modal" data-bs-target="#mouseModal">
+                            <i class="bi bi-mouse me-2"></i>Mouse
+                        </button>
+                    </div>
+                `;
+
+                // Add modal HTML
+                document.body.insertAdjacentHTML('beforeend', `
+                    <div class="modal fade" id="mouseModal" tabindex="-1" aria-labelledby="mouseModalLabel" aria-hidden="true" inert>
+                        <div class="modal-dialog modal-lg modal-fullscreen-md-down mx-auto my-0">
+                            <div class="modal-content bg-dark prevent-select border-0 py-3" style="min-height: 100dvh;">
+                                <div class="modal-header border-secondary prevent-select py-2">
+                                    <h5 class="modal-title text-light prevent-select">Mouse Control</h5>
+                                    <button type="button" class="btn-close btn-close-white prevent-select" data-bs-dismiss="modal" aria-label="Close"></button>
+                                </div>
+                                <div class="modal-body d-flex flex-column prevent-select p-2">
+                                    <div class="form-check form-switch mb-2">
+                                        <input class="form-check-input prevent-select" type="checkbox" id="mouseEnabled">
+                                        <label class="form-check-label text-light prevent-select" for="mouseEnabled">
+                                            Enable Mouse Control
+                                        </label>
+                                    </div>
+                                    <div class="flex-grow-1 mb-2">
+                                        <div id="mousePad" class="bg-secondary rounded prevent-select h-100" style="cursor: crosshair;"></div>
+                                    </div>
+                                    <div class="d-flex gap-2 pt-2 pb-4">
+                                        <button class="btn btn-outline-light flex-grow-1 prevent-select py-2" id="leftClickBtn">
+                                            <i class="bi bi-mouse"></i> Left Click
+                                        </button>
+                                        <button class="btn btn-outline-light flex-grow-1 prevent-select py-2" id="rightClickBtn">
+                                            <i class="bi bi-mouse"></i> Right Click
+                                        </button>
+                                    </div>
+                                    <div class="alert alert-warning d-none prevent-select mt-2" id="mouseAlert" role="alert"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `);
+
+                // Add style for modal
+                document.head.appendChild(this.createModalStyle());
+
+                // Cache DOM elements
+                this.mousePad = document.getElementById('mousePad');
+                this.leftClickBtn = document.getElementById('leftClickBtn');
+                this.rightClickBtn = document.getElementById('rightClickBtn');
+                this.mouseEnabled = document.getElementById('mouseEnabled');
+                this.alertBox = document.getElementById('mouseAlert');
+
+                // Setup event listeners
+                const mouseModal = document.getElementById('mouseModal');
+                mouseModal.addEventListener('shown.bs.modal', () => {
+                    this.adjustMousePadHeight();
+                    // Remove inert attribute when showing modal
+                    mouseModal.removeAttribute('inert');
+                });
+                
+                mouseModal.addEventListener('hidden.bs.modal', () => {
+                    // Add inert attribute when modal is hidden
+                    mouseModal.setAttribute('inert', '');
+                });
+                
+                window.addEventListener('resize', () => {
+                    if (mouseModal.classList.contains('show')) this.adjustMousePadHeight();
+                });
+
+                this.setupMousePad();
+                this.setupClickButtons();
+                this.mouseEnabled.addEventListener('change', () => this.handleEnabledChange());
+
+                this.isUIInitialized = true;
+                this.requestState();
+            }
+
+            createModalStyle() {
+                const style = document.createElement('style');
+                style.textContent = `
+                    body.modal-open {
+                        position: fixed;
+                        width: 100%;
+                        height: 100%;
+                        overflow: hidden;
+                    }
+                    #mouseModal {
+                        overflow-y: hidden !important;
+                    }
+                    #mouseModal .modal-dialog {
+                        height: 100vh;
+                        height: 100dvh;
+                        margin-left: auto;
+                        margin-right: auto;
+                    }
+                    @media (min-width: 768px) {
+                        #mouseModal .modal-dialog {
+                            width: 90%;
+                            max-width: 600px;
+                        }
+                    }
+                    #mouseModal .modal-content {
+                        height: 100%;
+                    }
+                    #mouseModal .modal-body {
+                        overflow: hidden;
+                    }
+                    /* Fix for iOS Safari */
+                    @supports (-webkit-touch-callout: none) {
+                        #mouseModal .modal-dialog {
+                            height: -webkit-fill-available;
+                        }
+                    }
+                `;
+                return style;
+            }
+
+            adjustMousePadHeight() {
+                if (!this.mousePad) return;
+                
+                const modalBody = this.mousePad.closest('.modal-body');
+                if (!modalBody) return;
+
+                requestAnimationFrame(() => {
+                    const modalBodyHeight = modalBody.clientHeight;
+                    const otherElementsHeight = Array.from(modalBody.children)
+                        .filter(el => el !== this.mousePad.parentElement)
+                        .reduce((total, el) => total + el.offsetHeight + 
+                            parseInt(window.getComputedStyle(el).marginBottom || 0) +
+                            parseInt(window.getComputedStyle(el).marginTop || 0), 0);
+                    
+                    const mousePadContainer = this.mousePad.parentElement;
+                    const availableHeight = modalBodyHeight - otherElementsHeight - 16;
+                    mousePadContainer.style.height = `${Math.max(200, availableHeight)}px`;
+                });
+            }
+
+            setupMousePad() {
+                // State variables
+                const state = {
+                    isDragging: false,
+                    startX: 0,
+                    startY: 0,
+                    lastX: 0,
+                    lastY: 0,
+                    lastTouchY1: 0,
+                    lastTouchY2: 0,
+                    lastTime: 0,
+                    lastVelocity: 0,
+                    lastScrollVelocity: 0,
+                    scrollAccumulator: 0,
+                    lastScrollTime: 0,
+                    lastScrollDelta: 0
+                };
+                
+                const SCROLL_THRESHOLD = 8;
+                const SCROLL_DEBOUNCE_MS = 32;
+
+                // Check if the mouse is enabled
+                const handleStart = (e) => {
+                    if (!this.mouseEnabled.checked) return;
+                    
+                    state.isDragging = true;
+                    
+                    if (e.type.includes('touch')) {
+                        const touch = e.touches[0];
+                        state.startX = state.lastX = touch.clientX;
+                        state.startY = state.lastY = touch.clientY;
+                        
+                        if (e.touches.length === 2) {
+                            state.lastTouchY1 = e.touches[0].clientY;
+                            state.lastTouchY2 = e.touches[1].clientY;
+                        }
+                    } else {
+                        state.startX = state.lastX = e.clientX;
+                        state.startY = state.lastY = e.clientY;
+                    }
+                    
+                    // Reset velocity and acceleration state
+                    state.lastTime = e.timeStamp;
+                    state.lastVelocity = 0;
+                    state.lastScrollVelocity = 0;
+                };
+
+                // Handles the movement to calculate the scroll and mouse movement
+                const handleMove = (e) => {
+                    if (!state.isDragging || !this.mouseEnabled.checked) return;
+                    e.preventDefault();
+
+                    const currentTime = e.timeStamp;
+                    // Only process movement if some time has passed (avoid super tiny movements)
+                    const timeDiff = currentTime - state.lastTime;
+                    if (timeDiff < 4) return;
+
+                    if (e.type.includes('touch')) {
+                        if (e.touches.length === 2) {
+                            // Two-finger scroll
+                            const touch1 = e.touches[0];
+                            const touch2 = e.touches[1];
+                            
+                            const deltaY1 = touch1.clientY - state.lastTouchY1;
+                            const deltaY2 = touch2.clientY - state.lastTouchY2;
+                            const avgDeltaY = (deltaY1 + deltaY2) / 2;
+                            
+                            const acceleration = calculateAcceleration(avgDeltaY, timeDiff, true);
+                            const scrollDelta = -avgDeltaY * this.scrollSensitivity * acceleration;
+                            
+                            if (Math.abs(scrollDelta) > 0) {
+                                processScroll(scrollDelta);
+                            }
+
+                            state.lastTouchY1 = touch1.clientY;
+                            state.lastTouchY2 = touch2.clientY;
+                        } else if (e.touches.length === 1) {
+                            // Single finger move
+                            handlePointerMove(e.touches[0].clientX, e.touches[0].clientY, timeDiff);
+                        }
+                    } else {
+                        // Mouse move
+                        handlePointerMove(e.clientX, e.clientY, timeDiff);
+                    }
+                    
+                    state.lastTime = currentTime;
+                };
+
+                // End of event to check for tap/click
+                const handleEnd = (e) => {
+                    if (!state.isDragging || !this.mouseEnabled.checked) return;
+                    
+                    // Check if this was a tap/click (small movement)
+                    const isTouchEvent = e.type.includes('touch');
+                    const clientX = isTouchEvent ? e.changedTouches[0].clientX : e.clientX;
+                    const clientY = isTouchEvent ? e.changedTouches[0].clientY : e.clientY;
+                    
+                    const deltaX = Math.abs(clientX - state.startX);
+                    const deltaY = Math.abs(clientY - state.startY);
+                    
+                    // For touch events, also check time (for tap detection)
+                    const isSmallMovement = deltaX < 10 && deltaY < 10;
+                    
+                    // Fix for Safari where e.touches might be empty on touchend
+                    const touchStartTime = state.lastTime || 0;
+                    const touchEndTime = e.timeStamp || 0;
+                    const isQuickTouch = !isTouchEvent || (touchEndTime - touchStartTime < 150);
+                    
+                    // Add debounce check for taps
+                    const currentTime = Date.now();
+                    const timeSinceLastTap = currentTime - this.lastTapTime;
+                    
+                    if (isSmallMovement && isQuickTouch && timeSinceLastTap > 50) {  // 50ms debounce
+                        this.sendWebSocketMessage('mouse', { click: 'left' });
+                        this.lastTapTime = currentTime;
+                    }
+                    
+                    state.isDragging = false;
+                };
+
+                // Add event listeners to the mouse pad
+                const supportsPassiveOption = (function() {
+                    let passiveSupported = false;
+                    try {
+                        const options = {
+                            get passive() {
+                                passiveSupported = true;
+                                return false;
+                            }
+                        };
+                        window.addEventListener("test", null, options);
+                        window.removeEventListener("test", null, options);
+                    } catch (err) {
+                        passiveSupported = false;
+                    }
+                    return passiveSupported;
+                })();
+                
+                const touchOptions = supportsPassiveOption ? { passive: false } : false;
+                
+                this.mousePad.addEventListener('mousedown', handleStart);
+                this.mousePad.addEventListener('mousemove', handleMove);
+                this.mousePad.addEventListener('mouseup', handleEnd);
+                this.mousePad.addEventListener('mouseleave', handleEnd);
+                this.mousePad.addEventListener('touchstart', handleStart, touchOptions);
+                this.mousePad.addEventListener('touchmove', handleMove, touchOptions);
+                this.mousePad.addEventListener('touchend', handleEnd);
+
+                // Scroll movement calculation with acceleration
+                const calculateAcceleration = (delta, timeDiff, isScroll = false) => {
+                    if (timeDiff === 0) return 1;
+                    
+                    const velocity = Math.abs(delta / timeDiff);
+                    const lastVelocityKey = isScroll ? 'lastScrollVelocity' : 'lastVelocity';
+                    const smoothingFactor = isScroll ? 0.85 : 0.8;
+                    const accelFactor = isScroll ? this.scrollAccelerationFactor : this.accelerationFactor;
+                    const maxAccel = isScroll ? this.scrollMaxAcceleration : this.maxAcceleration;
+                    
+                    state[lastVelocityKey] = state[lastVelocityKey] * smoothingFactor + velocity * (1 - smoothingFactor);
+                    return Math.min(1 + (state[lastVelocityKey] * accelFactor), maxAccel);
+                };
+
+                // Process scroll with debouncing
+                const processScroll = (deltaY) => {
+                    const currentTime = performance.now();
+                    if (currentTime - state.lastScrollTime < SCROLL_DEBOUNCE_MS) {
+                        state.scrollAccumulator += deltaY;
+                        return;
+                    }
+
+                    const smoothedInput = deltaY * 0.7 + state.lastScrollDelta * 0.3;
+                    const totalDelta = state.scrollAccumulator + smoothedInput;
+
+                    if (Math.abs(totalDelta) >= SCROLL_THRESHOLD) {
+                        // Smooth the delta
+                        const smoothedDelta = totalDelta * 0.7 + state.lastScrollDelta * 0.3;
+                        state.lastScrollDelta = smoothedDelta;
+                        
+                        // Apply non-linear scaling for small movements
+                        let finalDelta = smoothedDelta;
+                        const absDelta = Math.abs(smoothedDelta);
+                        if (absDelta < SCROLL_THRESHOLD * 1.5) {
+                            finalDelta = Math.sign(smoothedDelta) * 
+                                Math.pow(absDelta / SCROLL_THRESHOLD, 3) * SCROLL_THRESHOLD;
+                        }
+                        
+                        if (Math.abs(finalDelta) >= SCROLL_THRESHOLD) {
+                            this.sendWebSocketMessage('mouse', {
+                                scroll: Math.round(finalDelta)
+                            });
+                        }
+                        state.scrollAccumulator = 0;
+                    } else {
+                        state.scrollAccumulator = totalDelta;
+                    }
+                    state.lastScrollTime = currentTime;
+                };
+
+                //  Calculate mouse movement with acceleration
+                const handlePointerMove = (x, y, timeDiff) => {
+                    const deltaX = x - state.lastX;
+                    const deltaY = y - state.lastY;
+                    
+                    const acceleration = calculateAcceleration(
+                        Math.hypot(deltaX, deltaY),
+                        timeDiff
+                    );
+
+                    const acceleratedDeltaX = Math.round(deltaX * this.sensitivity * acceleration);
+                    const acceleratedDeltaY = Math.round(deltaY * this.sensitivity * acceleration);
+
+                    if (acceleratedDeltaX !== 0 || acceleratedDeltaY !== 0) {
+                        this.sendWebSocketMessage('mouse', {
+                            move: { x: acceleratedDeltaX, y: acceleratedDeltaY }
+                        });
+                    }
+
+                    state.lastX = x;
+                    state.lastY = y;
+                };
+                
+                // Prevent scrolling when interacting with the mouse pad
+                this.mousePad.style.touchAction = 'none';
+                
+                // Fix for iOS Safari to prevent elastic scrolling
+                document.addEventListener('touchmove', function(e) {
+                    if (e.target === this.mousePad) {
+                        e.preventDefault();
+                    }
+                }.bind(this), supportsPassiveOption ? { passive: false } : false);
+            }
+
+            setupClickButtons() {
+                const setupButton = (button, clickType) => {
+                    button.addEventListener('click', () => {
+                        if (!this.mouseEnabled.checked) return;
+                        this.sendWebSocketMessage('mouse', { click: clickType });
+                        button.classList.add('active');
+                        setTimeout(() => button.classList.remove('active'), 100);
+                    });
+                };
+                
+                setupButton(this.leftClickBtn, 'left');
+                setupButton(this.rightClickBtn, 'right');
+            }
+
+            // Send the mouse enabled state to the server, part of the two-way communication
+            handleEnabledChange() {
+                this.sendWebSocketMessage('mouse', {
+                    enabled: this.mouseEnabled.checked
+                });
+            }
+
+            // Request the mouse state from the server, part of the two-way communication
+            requestState() {
+                this.sendWebSocketMessage('getmouse');
+            }
+
+            onStateUpdate(data) {
+                if (data.type === 'mouse') {
+                    if (this.isUIInitialized) {
+                        this.updateUIWithState(data.value);
+                    } else {
+                        this.pendingState = data.value;
+                    }
+                }
+            }
+
+            updateUIWithState(state) {
+                if (!this.isUIInitialized) return;
+                
+                // Update UI elements
+                this.mouseEnabled.checked = state.IsEnabled;
+                this.mousePad.style.opacity = state.IsEnabled ? '1' : '0.5';
+                this.leftClickBtn.disabled = !state.IsEnabled;
+                this.rightClickBtn.disabled = !state.IsEnabled;
+
+                // Update sensitivity settings
+                this.sensitivity = state.Sensitivity;
+                this.scrollSensitivity = state.ScrollSensitivity;
+                this.accelerationFactor = state.AccelerationFactor;
+                this.maxAcceleration = state.MaxAcceleration;
+                this.scrollAccelerationFactor = state.ScrollAccelerationFactor || 0.4;
+                this.scrollMaxAcceleration = state.ScrollMaxAcceleration || 1.5;
+            }
+        }
+
+        // WebSocket Manager class
+        class WebSocketManager {
+            constructor() {
+                this.ws = null;
+                this.reconnectAttempts = 0;
+                this.maxReconnectAttempts = 5;
+                this.features = [];
+                console.log('WebSocketManager initialized');
+            }
+
+            addFeature(feature) {
+                console.log('Adding feature:', feature.constructor.name);
+                this.features.push(feature);
+            }
+
+            updateStatus(message, isError = false) {
+                console.log('WebSocket status:', message, isError ? '(error)' : '');
+                const statusElement = document.getElementById('connectionStatus');
+                const statusContainer = document.getElementById('statusContainer');
+                
+                if (window.location.hostname === 'localhost' || 
+                    window.location.hostname === '127.0.0.1' ||
+                    window.location.hostname === '[::1]') {
+                    statusContainer.style.display = 'none';
+                    return;
+                }
+
+                statusElement.textContent = message;
+                statusContainer.className = `text-center ${message === 'Connected' ? 'bg-success' : 
+                    (isError ? 'bg-danger' : 'bg-warning')} text-light`;
+            }
+
+            async connect() {
+                try {
+                    this.updateStatus('Connecting...', true);
+                    
+                    // Check if WebSocket is supported
+                    if (!window.WebSocket) {
+                        this.updateStatus('WebSockets are not supported in this browser. Please use a modern browser.', true);
+                        return;
+                    }
+                    
+                    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                    const password = window.location.pathname.split('/')[1] || '';
+                    const wsUrl = `${protocol}//${window.location.host}/${password}`;                    
+                    
+                    this.ws = new WebSocket(wsUrl);
+                    window.ws = this.ws;
+                    
+                    // Set a connection timeout
+                    const connectionTimeout = setTimeout(() => {
+                        if (this.ws.readyState !== WebSocket.OPEN) {
+                            this.ws.close();
+                            this.updateStatus('Connection timeout. Please try again.', true);
+                        }
+                    }, 10000);
+                    
+                    this.ws.onopen = () => {
+                        clearTimeout(connectionTimeout);
+                        console.log('WebSocket connected');
+                        this.updateStatus('Connected');
+                        this.reconnectAttempts = 0;                        
+                        this.features.forEach(feature => feature.requestState());
+                    };
+
+                    this.ws.onclose = (event) => {
+                        console.log('WebSocket closed with code:', event.code);
+                        this.updateStatus('Disconnected', true);
+                        
+                        if (this.reconnectAttempts++ < this.maxReconnectAttempts) {
+                            console.log('Attempting to reconnect...');
+                            setTimeout(() => this.connect(), 3000);
+                        } else {
+                            this.updateStatus('Connection failed. Please refresh the page.', true);
+                        }
+                    };
+
+                    this.ws.onerror = (error) => {
+                        console.error('WebSocket error:', error);
+                        this.updateStatus('Connection error', true);
+                    };
+
+                    this.ws.onmessage = (event) => {
+                        try {
+                            console.log('WebSocket message received:', event.data);
+                            const data = JSON.parse(event.data);
+                            if (data.type === 'error') {
+                                const message = data.message;
+                                let featureType = null;
+
+                                // Extract feature name and state from message
+                                const match = message.match(/(?:Feature\s+)?(\w+)(?:\s+is)?\s+(enabled|disabled)/i);
+                                if (match) {
+                                    featureType = match[1];
+                                    const isEnabled = match[2].toLowerCase() === 'enabled';
+                                    console.log(`Feature state change: ${featureType} ${isEnabled ? 'enabled' : 'disabled'}`);
+                                    
+                                    if (isEnabled) {
+                                        this.enableFeature(featureType);
+                                    } else {
+                                        this.disableFeature(featureType);
+                                    }
+                                } else {
+                                    console.error('Error message:', message);
+                                    this.updateStatus(`Error: ${message}`, true);
+                                }
+                                return;
+                            }                            
+                            this.features.forEach(feature => feature.onStateUpdate(data));
+                        } catch (error) {
+                            console.error('Error processing message:', error);
+                        }
+                    };
+                } catch (error) {
+                    console.error('Connection error:', error);
+                    this.updateStatus('Failed to connect: ' + error.message, true);
+                    
+                    if (this.reconnectAttempts++ < this.maxReconnectAttempts) {
+                        setTimeout(() => this.connect(), 3000);
+                    }
+                }
+            }
+
+            disableFeature(featureType) {
+                // Normalize the feature type to lowercase for comparison
+                const normalizedType = featureType.toLowerCase();
+                let feature = this.features.find(f => {
+                    // Check for special feature types first
+                    if (f instanceof DisplayFeature && normalizedType === 'display') {
+                        return true;
+                    }
+                    if (f instanceof MouseFeature && normalizedType === 'mouse') {
+                        return true;
+                    }
+                    if (f instanceof AudioFeature && 
+                        (normalizedType === f.type || 
+                         normalizedType === f.config?.title?.toLowerCase())) {
+                        return true;
+                    }
+                    return false;
+                });
+
+                if (feature?.element) {
+                    console.log('Disabling feature:', featureType);
+                    feature.element.style.opacity = '0.5';
+                    feature.element.style.pointerEvents = 'none';
+                    
+                    // Special handling for display feature
+                    if (feature instanceof DisplayFeature) {
+                        feature.cleanupModal();
+                    }
+                    
+                    // Save the current content before replacing it
+                    const content = feature.element.querySelector('.feature-content');
+                    if (content) {
+                        let displayName;
+                        if (feature instanceof AudioFeature) {
+                            displayName = feature.config.title;
+                        } else {
+                            displayName = feature.constructor.name.replace('Feature', '');
+                        }
+                        
+                        // Store the original content
+                        if (!content.dataset.originalContent) {
+                            content.dataset.originalContent = content.innerHTML;
+                        }
+                        content.innerHTML = `
+                            <div class="d-flex justify-content-center align-items-center h-100">
+                                <div class="text-center text-warning">
+                                    <i class="bi bi-exclamation-triangle fs-4 mb-2"></i>
+                                    <div>${displayName} is disabled</div>
+                                </div>
+                            </div>`;
+                    }
+                } else {
+                    console.warn('Feature not found:', featureType);
+                }
+            }
+
+            enableFeature(featureType) {
+                // Normalize the feature type to lowercase for comparison
+                const normalizedType = featureType.toLowerCase();
+                let feature = this.features.find(f => {
+                    // Check for special feature types first
+                    if (f instanceof DisplayFeature && normalizedType === 'display') {
+                        return true;
+                    }
+                    if (f instanceof MouseFeature && normalizedType === 'mouse') {
+                        return true;
+                    }
+                    if (f instanceof AudioFeature && 
+                        (normalizedType === f.type || 
+                         normalizedType === f.config?.title?.toLowerCase())) {
+                        return true;
+                    }
+                    return false;
+                });
+
+                if (feature?.element) {
+                    console.log('Enabling feature:', featureType);
+                    
+                    // Simply reload the page when any feature is enabled
+                    window.location.reload();
+                } else {
+                    console.warn('Feature not found:', featureType);
+                }
+            }
+        }
+
+        function getViewportRect(element, strategy) {
+            var win = getWindow(element);
+            var html = getDocumentElement(element);
+            var visualViewport = win.visualViewport;
+            var width = html.clientWidth;
+            var height = html.clientHeight;
+            var x = 0;
+            var y = 0;
+
+            if (visualViewport) {
+                width = visualViewport.width;
+                height = visualViewport.height;
+                var layoutViewport = isLayoutViewport();
+
+                if (layoutViewport || !layoutViewport && strategy === 'fixed') {
+                    x = visualViewport.offsetLeft;
+                    y = visualViewport.offsetTop;
+                }
+            }
+
+            return {
+                width: width,
+                height: height,
+                x: x + getWindowScrollBarX(element),
+                y: y
+            };
+        }
+    </script>
+</body>
+</html>
